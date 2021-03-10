@@ -13,6 +13,10 @@ export default {
         params: null,
       },
       {
+        type: 'OTHER_ACTION_QUEUE',
+        actionId: '75f1f81c-ff8f-4ad6-a62b-02c774e1ee21',
+      },
+      {
         type: 'SEND_REQUEST',
         dataCode: 'expense',
         params: null,
