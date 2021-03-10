@@ -1,10 +1,12 @@
 import _ from 'lodash';
-import { from, Observable, of, Subject } from 'rxjs';
-import { reduce } from 'rxjs/operators';
-
-interface Task {
-  type: string;
-}
+import { Subject } from 'rxjs';
+import actions from './actions';
+import {
+  PageAction,
+  PageActionOtherActionQueue,
+  PageActionQueue,
+  PageActionType,
+} from './types';
 
 type Result = object | boolean | string | number | undefined;
 
@@ -12,56 +14,84 @@ interface Payload {
   params?: Result;
 }
 
-interface Action {
-  id: string;
-  queue: Array<Task | string>;
+function runTask(payload: Payload, action: PageAction): Promise<Result> {
+  return new Promise<Result>((resolve) => {
+    const { params } = payload;
+    const result = _.add(params as number, 1);
+    console.log(action.type, result);
+    resolve(result);
+  });
 }
 
-async function runTask(payload: Payload, task: Task): Promise<Result> {
-  const calc = _.add(payload.params as number, 1);
-  console.log(task.type, calc);
-  return calc;
+interface ObservableActionQueues {
+  [actionQueueId: string]: {
+    start$: Subject<Result>;
+    result$: Subject<Result>;
+  };
 }
 
-const actions: { [key: string]: Action } = {
-  '1': {
-    id: '1',
-    queue: [
-      {
-        type: 'TASK1-1',
-      },
-      {
-        type: 'TASK1-2',
-      },
-      '2',
-    ],
-  },
-  '2': {
-    id: '2',
-    queue: [
-      {
-        type: 'TASK2-1',
-      },
-    ],
-  },
-};
+function getObservableActionQueues(actionQueues: {
+  [actionId: string]: PageActionQueue;
+}): ObservableActionQueues {
+  const observableActionQueues: ObservableActionQueues = {};
+  const actionQueueList = _.values(actionQueues);
 
-const run$ = from(actions['1'].queue).pipe(
-  reduce<Task | string, Observable<Result>>((acc, value) => {
-    const subject = new Subject<Result>();
-
-    acc.subscribe((result) =>
-      runTask({ params: result }, value).then((r) => {
-        subject.next(r);
-        subject.complete();
-      }),
+  while (actionQueueList.length > 0) {
+    // 若队列中的 action 是关联 id，且并未构建 observable，则先保留，到下一循环处理
+    // 余下的则是关联 action 均可以找到的
+    const list = _.remove(actionQueueList, (actionQueue) =>
+      actionQueue.actions.every(
+        (action) =>
+          action.type !== PageActionType.OTHER_ACTION_QUEUE ||
+          (action as PageActionOtherActionQueue).actionId in
+            observableActionQueues,
+      ),
     );
 
-    return subject;
-  }, of(0)),
-);
+    list.forEach((actionQueue) => {
+      const start = new Subject<Result>();
 
-run$.subscribe({
-  next: (result$) =>
-    result$.subscribe((result) => console.log('result is: ', result)),
-});
+      observableActionQueues[actionQueue.id] = {
+        start$: start,
+        result$: actionQueue.actions.reduce((acc, action) => {
+          const subject = new Subject<Result>();
+
+          if (action.type === PageActionType.OTHER_ACTION_QUEUE) {
+            const relativeAction$ =
+              observableActionQueues[
+                (action as PageActionOtherActionQueue).actionId
+              ];
+
+            relativeAction$.result$.subscribe((result) => subject.next(result));
+          } else {
+            acc.subscribe((params) => {
+              runTask({ params }, action).then((result) =>
+                subject.next(result),
+              );
+            });
+          }
+
+          return subject;
+        }, start),
+      };
+    });
+  }
+
+  return observableActionQueues;
+}
+
+function main() {
+  const actionQueues = getObservableActionQueues(
+    (actions as unknown) as { [key: string]: PageActionQueue },
+  );
+
+  const actionQueue = _.values(actionQueues)[0];
+
+  actionQueue.result$.subscribe((result) =>
+    console.log('result$ is: ', result),
+  );
+
+  actionQueue.start$.next(0);
+}
+
+main();
