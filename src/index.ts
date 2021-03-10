@@ -62,30 +62,34 @@ function getObservableActionQueues(actionQueues: {
 
           acc.subscribe(
             (payload) => {
-              if (payload.actionType === PageActionType.GUARD && !payload.data) {
+              if (
+                payload.actionType === PageActionType.GUARD &&
+                !payload.data
+              ) {
                 subject.complete();
               }
 
-              if (action.type === PageActionType.OTHER_ACTION_QUEUE) {
-                const act = action as PageActionOtherActionQueue;
+              runTask(payload.data, action)
+                .then((result) => {
+                  if (action.type === PageActionType.OTHER_ACTION_QUEUE) {
+                    const act = action as PageActionOtherActionQueue;
 
-                const relativeAction$ = observableActionQueues[act.actionId];
+                    const relativeAction$ =
+                      observableActionQueues[act.actionId];
 
-                relativeAction$.result$.subscribe((result) =>
-                  subject.next(result),
-                );
+                    relativeAction$.result$.subscribe((result) =>
+                      subject.next(result),
+                    );
 
-                relativeAction$.start$.next(payload);
-              } else {
-                runTask(payload.data, action)
-                  .then((result) =>
+                    relativeAction$.start$.next({ ...payload, data: result });
+                  } else {
                     subject.next({
                       data: result,
                       actionType: action.type,
-                    }),
-                  )
-                  .catch((error) => subject.error(error));
-              }
+                    });
+                  }
+                })
+                .catch((error) => subject.error(error));
             },
             (error) => subject.error(error),
             () => subject.complete(),
